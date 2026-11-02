@@ -58,7 +58,7 @@ export default class NewMenu extends View {
     const choices = [...installed, ...this.agents.filter(a => !a.installed).slice(0, 2)];
     const folder = panes().find(p => p.focused)?.cwd ?? space?.folder;
     const chat = (agent, name) => run("tab.new", { name, space: space?.id, mod: "agent-chat", props: { agent, folder, title: name } });
-    return v_flex().min_h(0).w_full().h(Math.min(578, 167 + (this.chats ? 87 : 0) + Math.max(1, choices.length) * 31)).bg(t.popover).p(5).text_size(12.8)
+    return v_flex().min_h(0).w_full().h(Math.min(578, 167 + (this.chats ? 100 : 0) + Math.max(1, choices.length) * 31)).bg(t.popover).p(5).text_size(12.8)
       .id("new-menu").track_focus(this.handle)
       .on_key_down((e) => {
         if (e.modifiers.control || e.modifiers.platform || e.modifiers.alt) return;
