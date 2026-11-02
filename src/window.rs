@@ -2535,6 +2535,22 @@ impl AppWindow {
         }
         if !self.live.contains_key(addr) { return Err(format!("no running terminal {addr:?}")); }
         if self.changing_terminals.contains(addr) { return Err("This terminal already has a pane change in progress.".into()); }
+        // A terminal seen through a mod becomes a tab of that mod, bound to it (`herdr.pane`).
+        if let Some((view, props)) = self.terminal_view(addr) {
+            let title = props.get("title").and_then(Value::as_str).unwrap_or(&view).to_owned();
+            let made = self.new_mod_tab(None, &title, view, props)?;
+            let pane = made["pane"].as_str().unwrap_or_default().to_owned();
+            let (core, address) = (self.core.clone(), addr.to_owned());
+            cx.background_executor()
+                .spawn(async move {
+                    if let Err(e) = core.call("terminal.label", json!({ "terminal": address, "labels": { "herdr.pane": pane } })) {
+                        tracing::warn!("binding {address} to its pane: {e:#}");
+                    }
+                })
+                .detach();
+            self.sync(window, cx);
+            return Ok(made);
+        }
         let space = self.model.active_space().map(|p| p.id.clone()).ok_or("no space to keep it in")?;
         let machine = self.machine_of(&space);
         if addr.split_once('/').map(|(m, _)| m) != machine.as_deref() {
@@ -3568,8 +3584,28 @@ impl AppWindow {
         cx.notify();
     }
 
+    /// The mod a terminal asks to be seen through: `herdr.view=<mod>`, with
+    /// `herdr.view-props` (a JSON object) for its props, plus `terminal`. A
+    /// sub-agent that is a chat (agent-chat) is peeked at and kept as that chat.
+    fn terminal_view(&self, addr: &str) -> Option<(String, Value)> {
+        let labels = self.live.get(addr)?.get("labels")?;
+        let name = labels.get("herdr.view")?.as_str().filter(|n| !n.is_empty() && self.folders.contains_key(*n))?;
+        let mut props = labels
+            .get("herdr.view-props")
+            .and_then(Value::as_str)
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
+        props["terminal"] = json!(addr);
+        Some((name.to_owned(), props))
+    }
+
     fn peek_terminal(&mut self, address: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.close_overlay("terminal-peek", window, cx);
+        let body = match self.terminal_view(address) {
+            Some((name, props)) => json!({ "type": "block", "content": { "mod": name, "props": props } }),
+            None => json!({ "type": "block", "content": { "terminal": address } }),
+        };
         self.open_overlay("terminal-peek".into(), json!({
             "kind": "dialog",
             "width": 0.8,
@@ -3578,7 +3614,7 @@ impl AppWindow {
                 "type": "column",
                 "children": [
                     { "type": "block", "size": { "px": 34 }, "content": { "mod": "peek", "props": { "terminal": address } } },
-                    { "type": "block", "content": { "terminal": address } }
+                    body
                 ]
             }
         }), window, cx);
