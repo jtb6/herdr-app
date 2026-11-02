@@ -6185,6 +6185,7 @@ globalThis.__gpui = (() => {
         oneBased(max_rows, "set_auto_grow(min_rows, max_rows) max_rows"),
       ),
     set_soft_wrap: (wrap) => __textarea_set_soft_wrap(handle, Boolean(wrap)),
+    set_submit_on_enter: (submit) => __textarea_set_submit_on_enter(handle, Boolean(submit)),
     focus: () => __textarea_focus(handle),
     release: () => __textarea_release(handle),
   });
@@ -7220,6 +7221,7 @@ impl ShellRuntime {
                 "overflow_x_scrollbar",
                 "overflow_y_scrollbar",
                 "viewport_from_layout",
+                "follow_bottom",
                 "controls_right",
                 "on_resize",
                 "on_size_change",
@@ -8262,6 +8264,7 @@ impl ShellRuntime {
             | "mode"
             | "scroll_size"
             | "viewport_from_layout"
+            | "follow_bottom"
             | "controls_right"
             | "panel_visible"
             | "panel_size"
@@ -8317,6 +8320,7 @@ impl ShellRuntime {
                     "mode" => "mode",
                     "scroll_size" => "scroll_size",
                     "viewport_from_layout" => "viewport_from_layout",
+                    "follow_bottom" => "follow_bottom",
                     "controls_right" => "controls_right",
                     "panel_visible" => "panel_visible",
                     "panel_size" => "panel_size",

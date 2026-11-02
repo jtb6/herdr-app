@@ -594,6 +594,23 @@ impl AppWindow {
         }
         w._tasks.push(cx.spawn_in(window, async move |this, cx| {
             while let Ok(req) = requests.recv().await {
+                // A screenshot draws a fresh frame first: a covered or
+                // minimized window draws none of its own, so the last one can
+                // be stale. Done here, outside the root view's update.
+                if let Request::Control { cmd, reply } = &req
+                    && let Some(path) = cmd.get("shot").and_then(Value::as_str)
+                {
+                    let saved = cx.update(|window, cx| {
+                        window.draw(cx).clear(cx);
+                        crate::control::save_shot(window, std::path::Path::new(path))
+                    });
+                    let _ = reply.send(match saved {
+                        Ok(Ok(())) => json!({ "path": path }),
+                        Ok(Err(error)) => json!({ "error": format!("cannot save screenshot: {error:#}") }),
+                        Err(error) => json!({ "error": format!("cannot save screenshot: {error:#}") }),
+                    });
+                    continue;
+                }
                 if this.update_in(cx, |this, window, cx| this.handle(req, window, cx)).is_err() {
                     break;
                 }
@@ -1148,6 +1165,10 @@ impl AppWindow {
             Some(Content::Mod { name, props }) => mods.push((n.id.clone(), Instance { name: name.clone(), props: props.clone() })),
             _ => {}
         };
+        let visit_pane = |n: &Node, terms: &mut Vec<(String, String)>, mods: &mut Vec<(String, Instance)>| match n.content() {
+            Some(Content::Mod { name, props }) => mods.push((n.id.clone(), pane_mod(n, name, props))),
+            _ => visit(n, terms, mods),
+        };
         let stacks = |root: &Node, mods: &mut Vec<(String, Instance)>| {
             for n in visible_nodes(root) {
                 if let Kind::Stack { header: Some(h), .. } = &n.kind
@@ -1190,7 +1211,7 @@ impl AppWindow {
                 {
                     mods.push(pane_header_mod(n, name, props));
                 }
-                visit(n, &mut terms, &mut mods);
+                visit_pane(n, &mut terms, &mut mods);
                 if let Some(a) = self.swapped.get(&n.id) {
                     terms.push((format!("{}{SWAP}", n.id), a.clone()));
                 }
@@ -1247,7 +1268,7 @@ impl AppWindow {
         for c in self.model.tabs() {
             for n in c.root.walk() {
                 if let Some(Content::Mod { name, props }) = n.content() {
-                    out.insert(n.id.clone(), inst(name, props));
+                    out.insert(n.id.clone(), pane_mod(n, name, props));
                 }
                 if let Some((name, props)) = &header
                     && n.is_pane()
@@ -1336,10 +1357,11 @@ impl AppWindow {
 
     /// What's on screen now, for done-vs-seen.
     fn visible_addresses(&self) -> Vec<String> {
-        let (terms, _) = self.visible();
+        let (terms, mods) = self.visible();
         // A swapped-in terminal is drawn instead of its pane's own.
         let covered: HashSet<&str> = terms.iter().filter_map(|(slot, _)| slot.strip_suffix(SWAP)).collect();
         let mut out: Vec<String> = terms.iter().filter(|(slot, _)| !covered.contains(slot.as_str())).map(|(_, a)| a.clone()).collect();
+        out.extend(mods.iter().filter_map(|(slot, _)| self.model.bound.get(slot).cloned()));
         if self.shows_agent() {
             out.extend(self.shown_agent());
         }
@@ -1652,18 +1674,34 @@ impl AppWindow {
                 for p in ctx.root.panes() {
                     let focused = m.active.as_deref() == Some(pr.id.as_str()) && focused_pane.as_deref() == Some(p.id.as_str());
                     let zoomed = ctx.zoomed.as_deref() == Some(p.id.as_str());
-                    // A mod pane: what it shows, no terminal.
-                    if let Some(Content::Mod { name, .. }) = p.content() {
-                        panes.push(json!({ "pane": p.id, "terminal": null, "mod": name, "tab": ctx.id, "title": name, "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id) }));
-                        continue;
-                    }
-                    let Some(addr) = p.terminal() else { continue };
+                    // A mod pane: what it shows, titled by its `title` prop; with a
+                    // terminal bound to it (`herdr.pane`), that terminal's pane.
+                    let mod_pane = match p.content() {
+                        Some(Content::Mod { name, props }) => Some((name, props.get("title").and_then(Value::as_str).unwrap_or(name).to_owned())),
+                        _ => None,
+                    };
+                    let addr = match &mod_pane {
+                        Some((name, title)) => match m.bound.get(&p.id) {
+                            Some(addr) => addr.as_str(),
+                            None => {
+                                panes.push(json!({ "pane": p.id, "terminal": null, "mod": name, "tab": ctx.id, "title": title, "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id) }));
+                                continue;
+                            }
+                        },
+                        None => {
+                            let Some(addr) = p.terminal() else { continue };
+                            addr
+                        }
+                    };
                     let a = m.agents.get(addr);
-                    let title = self.terms.get(&p.id).map(|t| t.view.read(cx).title.clone()).or_else(|| {
-                        self.live.get(addr).and_then(|r| r.get("title")).and_then(Value::as_str).map(str::to_owned)
-                    });
+                    let title = match &mod_pane {
+                        Some((_, title)) => Some(title.clone()),
+                        None => self.terms.get(&p.id).map(|t| t.view.read(cx).title.clone()).or_else(|| {
+                            self.live.get(addr).and_then(|r| r.get("title")).and_then(Value::as_str).map(str::to_owned)
+                        }),
+                    };
                     panes.push(json!({
-                        "pane": p.id, "terminal": addr, "tab": ctx.id, "title": title.clone().unwrap_or_default(),
+                        "pane": p.id, "terminal": addr, "mod": mod_pane.as_ref().map(|(name, _)| name), "tab": ctx.id, "title": title.clone().unwrap_or_default(),
                         "cwd": self.cwds.get(addr), "branch": m.folder_info.get(addr).and_then(|f| f.branch.clone()),
                         "status": m.status(addr), "app": a.and_then(|a| a.app.clone()), "program": self.program(addr),
                         "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id),
@@ -1720,7 +1758,7 @@ impl AppWindow {
         for p in &m.spaces {
             let name = m.space_name(p, &home);
             for c in &p.tabs {
-                for a in model::addresses(&c.root) {
+                for a in m.addresses_in(&c.root) {
                     want.insert(a, format!("{name} / {}", Model::tab_name(p, c)));
                 }
             }
@@ -1973,9 +2011,11 @@ impl AppWindow {
     /// finished agent you're looking at is no longer news), their folders, their
     /// streams. `listed`: the list itself changed.
     fn tend_terminals(&mut self, listed: bool, window: &mut Window, cx: &mut Context<Self>) {
-        // Place newly labeled terminals first: one that is blocked on its first
-        // listing is ours, and must ring.
-        let mut changed = self.reconcile(window, cx);
+        // Bind terminals to the mod panes they stand for, then place newly
+        // labeled terminals: one that is blocked on its first listing is ours,
+        // and must ring.
+        let mut changed = self.bind_terminals();
+        changed |= self.reconcile(window, cx);
         let visible: HashSet<String> = self.visible_addresses().into_iter().collect();
         let mut alerts = Vec::new();
         for (addr, rec) in &self.live {
@@ -2059,6 +2099,28 @@ impl AppWindow {
     /// is gone (ended while hidden, or while the app was closed) and places
     /// terminals labeled `herdr.space` that aren't shown (started by an
     /// agent, a script, or before a restart). Returns whether anything changed.
+    /// Binds each terminal labeled `herdr.pane=<pane>` to that mod pane: the
+    /// pane stands for the terminal (agent, status, attention, sub-agents) and
+    /// closing it ends the terminal. A mod that runs a program for its pane (a
+    /// chat with an agent) starts it with that label and `--keep`. Rebuilt from
+    /// core's records each time, so a terminal that ends unbinds itself.
+    fn bind_terminals(&mut self) -> bool {
+        let mut live: Vec<(&String, &Value)> = self.live.iter().collect();
+        live.sort_by(|a, b| a.0.cmp(b.0));
+        let mut bound = HashMap::new();
+        for (addr, rec) in live {
+            let Some(pane) = rec.pointer("/labels/herdr.pane").and_then(Value::as_str).filter(|p| !p.is_empty()) else { continue };
+            let pane = crate::mirror::qualify(pane, addr.split_once('/').map(|(m, _)| m));
+            let is_mod = self.model.tabs().any(|c| c.root.find(&pane).is_some_and(|n| matches!(n.content(), Some(Content::Mod { .. }))));
+            if is_mod {
+                bound.entry(pane).or_insert_with(|| addr.clone());
+            }
+        }
+        let changed = bound != self.model.bound;
+        self.model.bound = bound;
+        changed
+    }
+
     fn reconcile(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // No fresh shells while quitting: the next start brings them back.
         if QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
@@ -4533,6 +4595,14 @@ fn float_mod(id: &str, name: &str, props: &Value) -> (String, Instance) {
 }
 
 /// A pane header's slot and copy, told which pane it sits on (a mod pane has no terminal).
+/// A tab's mod pane: its props plus `pane`, its id, which a mod puts on the
+/// terminal it runs for the pane (`herdr.pane`) to make the pane stand for it.
+fn pane_mod(n: &Node, name: &str, props: &Value) -> Instance {
+    let mut props = if props.is_object() { props.clone() } else { json!({}) };
+    props["pane"] = json!(n.id);
+    Instance { name: name.to_owned(), props }
+}
+
 fn pane_header_mod(n: &Node, name: &str, props: &Value) -> (String, Instance) {
     let mut props = if props.is_object() { props.clone() } else { json!({}) };
     props["pane"] = json!(n.id);

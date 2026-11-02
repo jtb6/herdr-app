@@ -1783,6 +1783,12 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     viewport_from_layout<Self extends Element>(this: Self): Self;
     /**
+     * HERDR: keeps a scroll area (`overflow_y_scroll`) at its end while it is
+     * there, so content added below scrolls into view, as a chat or a log
+     * does. Scrolled up, it stays put until scrolled back to the end.
+     */
+    follow_bottom<Self extends Element>(this: Self): Self;
+    /**
      * How far a `resizable_panel()` may be dragged, in pixels.
      *
      * Two arguments rather than a range, which JavaScript cannot write. The
@@ -3126,6 +3132,8 @@ const BASE: &str = r#"  /** A row. */
     set_rows(rows: number): void;
     /** Grows with the content, between the two row counts. */
     set_auto_grow(min_rows: number, max_rows: number): void;
+    /** HERDR: Enter submits (emits `submit`) and Shift+Enter adds a line. Default off. */
+    set_submit_on_enter(submit: boolean): void;
     /** Wraps long lines instead of scrolling sideways. Default is on. */
     set_soft_wrap(wrap: boolean): void;
     /** Moves the keyboard onto the textarea. */
@@ -4026,6 +4034,7 @@ mod tests {
         "mode",
         "scroll_size",
         "viewport_from_layout",
+        "follow_bottom",
         "size_range",
         "on_resize",
         "set_position",

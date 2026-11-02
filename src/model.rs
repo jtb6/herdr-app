@@ -86,6 +86,9 @@ pub struct Model {
     seq: u64,
     /// Where each terminal works now: its repo (worktrees included) and branch.
     pub folder_info: HashMap<String, FolderInfo>,
+    /// Terminals that stand for mod panes: pane id → address, from the
+    /// `herdr.pane` label. Rebuilt from core's records, never saved.
+    pub bound: HashMap<String, String>,
 }
 
 /// Herdr's attention priority: blocked > done > working > idle > nothing.
@@ -361,7 +364,7 @@ impl Model {
             let id = p.id.clone();
             self.remove_space(&id);
         }
-        (addresses(&removed.root), closed)
+        (self.addresses_in(&removed.root), closed)
     }
 
     /// Removes a space (remembered in `recent`). Returns its terminal addresses.
@@ -375,7 +378,7 @@ impl Model {
         if was_active {
             self.active = self.spaces.get(pi).or(self.spaces.last()).map(|p| p.id.clone());
         }
-        p.tabs.iter().flat_map(|c| addresses(&c.root)).collect()
+        p.tabs.iter().flat_map(|c| self.addresses_in(&c.root)).collect()
     }
 
     /// The focused pane of the selected space's selected tab.
@@ -420,18 +423,28 @@ impl Model {
         self.select_tab(&ctx)
     }
 
-    /// The address shown in a pane block.
+    /// The terminal a pane stands for: the one it shows, or the one bound to a mod pane.
+    fn pane_address(&self, n: &Node) -> Option<String> {
+        n.terminal().map(str::to_owned).or_else(|| self.bound.get(&n.id).cloned())
+    }
+
+    /// The address shown in a pane block (or bound to a mod pane).
     pub fn address_of(&self, pane_id: &str) -> Option<String> {
-        self.tabs().find_map(|c| c.root.find(pane_id)).and_then(|n| n.terminal()).map(str::to_owned)
+        self.tabs().find_map(|c| c.root.find(pane_id)).and_then(|n| self.pane_address(n))
     }
 
     pub fn pane_of(&self, address: &str) -> Option<String> {
-        self.tabs().flat_map(|c| c.root.terminals()).find(|n| n.terminal() == Some(address)).map(|n| n.id.clone())
+        self.tabs().flat_map(|c| c.root.panes()).find(|n| self.pane_address(n).as_deref() == Some(address)).map(|n| n.id.clone())
+    }
+
+    /// The terminals a subtree's panes stand for, in tree order: bound ones included.
+    pub fn addresses_in(&self, node: &Node) -> Vec<String> {
+        node.panes().into_iter().filter_map(|n| self.pane_address(n)).collect()
     }
 
     /// Every terminal in every tab, in space → tab → pane order.
     pub fn all_addresses(&self) -> Vec<String> {
-        self.tabs().flat_map(|c| addresses(&c.root)).collect()
+        self.tabs().flat_map(|c| self.addresses_in(&c.root)).collect()
     }
 
     /// Applies a status word from core (Herdr's seen rules).
@@ -514,12 +527,12 @@ impl Model {
 
     /// When something in a tab last changed state, ms (None: nothing since the app started).
     pub fn changed_at(&self, c: &Tab) -> Option<u64> {
-        addresses(&c.root).iter().filter_map(|a| self.agents.get(a)).map(|a| a.since).filter(|t| *t > 0).max()
+        self.addresses_in(&c.root).iter().filter_map(|a| self.agents.get(a)).map(|a| a.since).filter(|t| *t > 0).max()
     }
 
     /// Since when an agent in a tab has been working, ms (the earliest, if several).
     pub fn working_since(&self, c: &Tab) -> Option<u64> {
-        addresses(&c.root)
+        self.addresses_in(&c.root)
             .iter()
             .filter_map(|a| self.agents.get(a))
             .filter(|a| a.word.as_deref() == Some("working") && a.since > 0)
@@ -585,7 +598,7 @@ pub fn space_json(m: &Model, p: &Space, index: usize, branch: Option<&str>, home
                 "name": Model::tab_name(p, c),
                 "named": !c.name.is_empty(),
                 "active": Some(&c.id) == active.as_ref(),
-                "status": m.rollup(&addresses(&c.root)),
+                "status": m.rollup(&m.addresses_in(&c.root)),
                 "panes": c.root.panes().len(),
                 "zoomed": c.zoomed.is_some(),
                 "settled": c.settled.is_some(),
@@ -595,7 +608,7 @@ pub fn space_json(m: &Model, p: &Space, index: usize, branch: Option<&str>, home
             })
         })
         .collect();
-    let all: Vec<String> = p.tabs.iter().flat_map(|c| addresses(&c.root)).collect();
+    let all: Vec<String> = p.tabs.iter().flat_map(|c| m.addresses_in(&c.root)).collect();
     json!({
         "id": p.id,
         "index": index + 1,

@@ -427,6 +427,8 @@ struct Behavior {
     /// Whether a `Scrollbar` takes its viewport from its own layout box rather
     /// than from the scroll area. The way to keep a bar off a fixed header.
     viewport_from_layout: bool,
+    /// HERDR: a scroll area that stays at its end while it is there.
+    follow_bottom: bool,
     /// A resizable panel's initial size along its group's axis.
     ///
     /// Recorded under a name no script spells. `ResizablePanel::size` is base's
@@ -2226,15 +2228,15 @@ fn flex_element(
     // `Scrollable` owns a position of its own, on the inner area it builds.
     let stateful = match (scroll_x, scroll_y) {
         (true, true) => {
-            components::scrollbar::track_scroll_position(stateful, &identity, window, cx)
+            components::scrollbar::track_scroll_position(stateful, &identity, behavior.follow_bottom, window, cx)
                 .overflow_scroll()
         }
         (true, false) => {
-            components::scrollbar::track_scroll_position(stateful, &identity, window, cx)
+            components::scrollbar::track_scroll_position(stateful, &identity, behavior.follow_bottom, window, cx)
                 .overflow_x_scroll()
         }
         (false, true) => {
-            components::scrollbar::track_scroll_position(stateful, &identity, window, cx)
+            components::scrollbar::track_scroll_position(stateful, &identity, behavior.follow_bottom, window, cx)
                 .overflow_y_scroll()
         }
         (false, false) => stateful,
@@ -3468,6 +3470,7 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
             }
         }
         "viewport_from_layout" => behavior.viewport_from_layout = true,
+        "follow_bottom" => behavior.follow_bottom = true,
         "controls_right" => behavior.controls_right = true,
         "panel_visible" => behavior.visible = Some(flag.unwrap_or(true)),
         "panel_size" => {

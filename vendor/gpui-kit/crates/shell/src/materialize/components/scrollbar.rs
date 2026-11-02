@@ -110,6 +110,7 @@ pub(in crate::materialize) fn scrollbar(
 pub(in crate::materialize) fn track_scroll_position<E: StatefulInteractiveElement>(
     element: E,
     identity: &ElementId,
+    follow_bottom: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> E {
@@ -117,7 +118,13 @@ pub(in crate::materialize) fn track_scroll_position<E: StatefulInteractiveElemen
     if crate::materialize::checking() {
         return element;
     }
-    element.track_scroll(&scroll_position(identity, window, cx))
+    let handle = scroll_position(identity, window, cx);
+    // HERDR: `follow_bottom` pins an area that is at its end (within a few
+    // pixels) to the end of whatever this frame lays out.
+    if follow_bottom && handle.offset().y <= -handle.max_offset().y + gpui::px(4.) {
+        handle.scroll_to_bottom();
+    }
+    element.track_scroll(&handle)
 }
 
 /// The scroll position shared by a scroll area and the bars driving it.
