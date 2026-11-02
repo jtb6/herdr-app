@@ -243,9 +243,10 @@ impl Model {
         if !p.name.is_empty() {
             return p.name.clone();
         }
-        let first = p.tabs.iter().flat_map(|c| c.root.terminals()).next();
+        // Terminal panes, and mod panes a terminal is bound to (a chat), count alike.
+        let first = p.tabs.iter().flat_map(|c| c.root.panes()).find(|n| self.pane_address(n).is_some());
         let folder = first
-            .and_then(|n| n.terminal().and_then(|a| self.folder_info.get(a)).map(|f| f.top.clone()).or_else(|| self.pane_folders.get(&n.id).cloned()))
+            .and_then(|n| self.pane_address(n).and_then(|a| self.folder_info.get(&a)).map(|f| f.top.clone()).or_else(|| self.pane_folders.get(&n.id).cloned()))
             .unwrap_or_else(|| p.folder.clone());
         folder_name(&folder, home)
     }
