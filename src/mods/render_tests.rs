@@ -694,7 +694,9 @@ fn shipped_layouts_and_keys() {
         match v {
             Value::Object(o) => {
                 if let Some(Value::String(name)) = o.get("mod") {
-                    assert!(mods.contains(name), "unknown layout mod {name}");
+                    // agent-chat fork: the Shepherd's column names a mod installed
+                    // separately (~/.config/herdr-app/mods/agent-chat).
+                    assert!(mods.contains(name) || name == "agent-chat", "unknown layout mod {name}");
                 }
                 for v in o.values() {
                     references(v, mods);

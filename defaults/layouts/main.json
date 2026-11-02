@@ -178,6 +178,24 @@
           }
         }
       ]
+    },
+    {
+      "id": "shepherd",
+      "type": "block",
+      "hidden": true,
+      "size": {
+        "px": 420
+      },
+      "min": 320,
+      "max": 760,
+      "background": "background",
+      "content": {
+        "mod": "agent-chat",
+        "props": {
+          "role": "shepherd",
+          "docked": true
+        }
+      }
     }
   ]
 }

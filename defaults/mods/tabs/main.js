@@ -1,6 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, terminals, appHome } from "herdr";
+import * as fs from "fs/promises";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -12,9 +13,28 @@ function find(node, id) {
 }
 
 export default class Tabs extends View {
-  init() {
+  init(_props, cx) {
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
+    // agent-chat fork: the Shepherd's button, when that mod is installed.
+    cx.spawn(async cx => {
+      try { this.shepherd = await fs.exists(`${appHome()}/mods/agent-chat/main.js`); } catch {}
+      cx.notify();
+    });
+  }
+
+  // The Shepherd's column (agent-chat): one for the whole app, open or not
+  // everywhere. Its status is its terminal's (named `shepherd`).
+  shepherdButton(t, node, stop) {
+    const on = !node.hidden;
+    const word = terminals().find(x => x.name === "shepherd" && x.state === "live")?.status?.state;
+    return h_flex().id("panel-shepherd").h(26).px(8).gap(5).flex_none().items_center().rounded(6)
+      .text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
+      .hover(s => s.bg(t.hover)).on_mouse_down("left", stop)
+      .on_click(() => run("layout.toggle", { id: "shepherd" }))
+      .child(svg("mods/agent-chat/icons/sparkle.svg").size(14).text_color(on ? t.accent : t.muted)).child("Shepherd")
+      .when(word === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900)))
+      .when(word === "blocked", el => el.child(div().size(6).rounded(3).bg(t.blocked)));
   }
 
   // The side panel is remembered per space: switching shows that space's choice
@@ -96,6 +116,7 @@ export default class Tabs extends View {
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
+      .when(Boolean(this.shepherd && find(root, "shepherd")), el => el.child(this.shepherdButton(t, find(root, "shepherd"), stop)))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
