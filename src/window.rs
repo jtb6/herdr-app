@@ -3742,7 +3742,8 @@ impl AppWindow {
                     .tabs
                     .iter()
                     .map(|c| {
-                        let terms: Vec<Value> = c.root.terminals().iter().filter_map(|n| Some(terminal(&n.id, n.terminal()?))).collect();
+                        // Terminal panes, and terminals bound to mod panes (a chat's agent).
+                        let terms: Vec<Value> = c.root.panes().iter().filter_map(|n| Some(terminal(&n.id, &m.address_of(&n.id)?))).collect();
                         json!({ "id": c.id, "name": Model::tab_name(p, c), "active": Some(&c.id) == active.as_ref(), "settled": c.settled.is_some(), "terminals": terms })
                     })
                     .collect();
